@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "main.h"
+#include "resource.h"
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
@@ -12,15 +12,13 @@
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "comctl32.lib")
 
-#include "resource.h"
-
 constexpr auto IFEO_PATH = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options"; // Registry path
 constexpr size_t MAX_STRING = 256;
 
 HINSTANCE hInst;
 HWND hListView, hStatusBar;
 bool ShowSystemApps = false;
-bool ShowExistingApps = false;
+bool ShowUnmanagedApps = false;
 constexpr auto DEFAULT_TEXT = L"Default";
 constexpr auto RegPriority = L"CpuPriorityClass";
 constexpr auto RegManaged = L"SetPriorityManaged";
@@ -291,7 +289,7 @@ static void PriorityList(HWND hDlg) {
 	SendDlgItemMessageW(hDlg, IDC_PRIORITY_COMBO, CB_SETCURSEL, 0, 0); // Default selection
 }
 
-static void ListApps() {
+static void ListApps(bool updateStatus = true) {
 	if (!hListView) return;
 
 	ListView_DeleteAllItems(hListView);
@@ -308,11 +306,13 @@ static void ListApps() {
 			managedCount++;
 		}
 
-		if (isSystem) {
-			if (!ShowSystemApps) continue; // Skip if show system apps not enable
+		if (isSystem) { //fix
+			if (!IsSetPriorityApp(app) && !ShowSystemApps)
+				continue; // Skip un-managed system app unless ShowSystemApps is enabled
 		}
 		else {
-			if (!ShowExistingApps && !IsSetPriorityApp(app)) continue; // Skip if not managed by SetPriority
+			if (!ShowUnmanagedApps && !IsSetPriorityApp(app))
+				continue; // Skip non-system apps not managed by SetPriority
 		}
 
 		// insert into ListView
@@ -328,21 +328,22 @@ static void ListApps() {
 		ListView_SetItemText(hListView, lvItem.iItem, 1, const_cast<LPWSTR>(prioName));
 	}
 
-	std::wstring status =
-		L"Found " + std::to_wstring(userCount) + L" user app(s), " +
-		std::to_wstring(systemCount) + L" system app(s), " +
-		std::to_wstring(managedCount) + L" managed by SetPriority";
-	SetStatus(status);
+	if (updateStatus) {
+		std::wstring status =
+			L"Found " + std::to_wstring(userCount) + L" user app(s), " +
+			std::to_wstring(systemCount) + L" system app(s), " +
+			std::to_wstring(managedCount) + L" managed by SetPriority";
+		SetStatus(status);
+	}
 }
 
-static void StoreSelection() {
+void StoreSelection() {
 	if (!hListView) return;
 
 	int selIndex = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-
 	int topIndex = ListView_GetTopIndex(hListView);
 
-	ListApps();
+	ListApps(false); // don't update status here
 
 	if (selIndex >= 0) {
 		ListView_SetItemState(hListView, selIndex, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
@@ -353,17 +354,9 @@ static void StoreSelection() {
 }
 
 static void RefreshList(HWND parent, const std::wstring& appName) {
-	if (DialogBoxParam(hInst, MAKEINTRESOURCE(IDD_EDIT), parent, EditDlg, (LPARAM)&appName) == IDOK) {
-		StoreSelection();
-
-		DWORD priority = 0;
-		std::wstring priorityName = DEFAULT_TEXT;
-		if (GetPriority(appName, priority)) {
-			priorityName = ConvertHexToName(priority);
-		}
-
-		std::wstring status = L"Changed app \"" + appName + L"\" and set priority to " + priorityName;
-		SetStatus(status);
+	INT_PTR result = DialogBoxParam(hInst, MAKEINTRESOURCE(IDD_EDIT), parent, EditDlg, (LPARAM)&appName);
+	if (result == IDOK || result == 1001) {
+		StoreSelection(); // Refresh without status overwrite
 	}
 }
 
@@ -483,12 +476,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		}
 
-		case IDM_SHOW_EXSITING:
+		case IDM_SHOW_UNMANAGED:
 		{
-			ShowExistingApps = !ShowExistingApps;  // toggle existing apps visibility
+			ShowUnmanagedApps = !ShowUnmanagedApps;  // toggle unmanaged apps visibility
 			// update menu checkmark
 			HMENU hMenu = GetMenu(hWnd);
-			CheckMenuItem(hMenu, IDM_SHOW_EXSITING, ShowExistingApps ? MF_CHECKED : MF_UNCHECKED);
+			CheckMenuItem(hMenu, IDM_SHOW_UNMANAGED, ShowUnmanagedApps ? MF_CHECKED : MF_UNCHECKED);
 			ListApps();  // refresh list
 			break;
 		}
@@ -798,8 +791,14 @@ INT_PTR CALLBACK EditDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 			SendDlgItemMessageW(hDlg, IDC_PRIORITY_COMBO, CB_SETCURSEL, 0, 0); // Default
 		}
 
-		CenterWindow(hDlg);
+		if (IsSetPriorityApp(*appNamePtr)) { // check if app is managed by SetPriority
+			EnableWindow(GetDlgItem(hDlg, IDC_UNMANAGED), TRUE);
+		}
+		else {
+			EnableWindow(GetDlgItem(hDlg, IDC_UNMANAGED), FALSE);
+		}
 
+		CenterWindow(hDlg);
 		return (INT_PTR)TRUE;
 	}
 
@@ -821,6 +820,15 @@ INT_PTR CALLBACK EditDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 				}
 			}
 
+			DWORD priority = 0;
+			std::wstring priorityName = DEFAULT_TEXT;
+			if (GetPriority(*appNamePtr, priority)) {
+				priorityName = ConvertHexToName(priority);
+			}
+
+			std::wstring status = L"Changed app \"" + *appNamePtr + L"\" and set priority to " + priorityName;
+			SetStatus(status);
+
 			EndDialog(hDlg, IDOK);
 			return (INT_PTR)TRUE;
 		}
@@ -838,6 +846,28 @@ INT_PTR CALLBACK EditDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 				EndDialog(hDlg, IDCANCEL);
 			}
 			return (INT_PTR)TRUE;
+
+
+		case IDC_UNMANAGED:
+		{
+			if (appNamePtr) {
+				std::wstring msg = L"This app will now unmanaged\nUnmanaged \"" + *appNamePtr + L"\"?";
+				if (MessageBoxW(hDlg, msg.c_str(), L"Confirm", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
+					std::wstring perfKey = GetRegPath(*appNamePtr);
+					HKEY hKey;
+					if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, perfKey.c_str(), 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+						RegDeleteValueW(hKey, RegManaged);
+						RegCloseKey(hKey);
+					}
+
+					std::wstring status = L"Unmanaged \"" + *appNamePtr + L"\"";
+					SetStatus(status);
+
+					EndDialog(hDlg, 1001); // custom code for unmanaged
+				}
+			}
+			return (INT_PTR)TRUE;
+		}
 
 		case IDCANCEL:
 			EndDialog(hDlg, IDCANCEL);

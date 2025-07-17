@@ -27,10 +27,11 @@
 #define IDC_BUTTON_BROWSE               122
 #define ID_MENU                         123
 #define ID_SHOW_SYSTEM                  124
-#define IDM_SHOW_EXSITING               125
+#define IDM_SHOW_UNMANAGED              125
 #define ID_BUTTON_SHORTCUT				126
 #define IDM_SHORTCUT					127
 #define IDD_SHORTCUT					128
+#define IDC_UNMANAGED					129
 #define LISTVIEW					    1001
 #define STATUSBAR						1002
 #define IDC_STATIC                      -1
