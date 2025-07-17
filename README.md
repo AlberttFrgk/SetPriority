@@ -1,7 +1,7 @@
 
 # SetPriority - App Priority Manager
 
-![SetPriority](https://i.imgur.com/EGmVMgn.png)
+![SetPriority](https://i.imgur.com/yahUcnC.png)
 
 **SetPriority** is a lightweight native Windows tool to set and manage CPU priority for specific applications via the Windows Registry, particularly using **Image File Execution Options (IFEO) PerfOptions, built with C++ (Win32 API)**.
 
