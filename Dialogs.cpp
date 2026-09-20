@@ -1,4 +1,4 @@
-#include "pch.h"
+#include "framework.h"
 #include "Dialogs.h"
 #include "AppUtils.h"
 #include "PriorityManager.h"
